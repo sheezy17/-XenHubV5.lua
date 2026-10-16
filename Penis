@@ -1,0 +1,336 @@
+-- XENHUB V5 | AUTO GRAB + PET SELECTOR
+-- LocalScript: StarterPlayerScripts
+-- For a Roblox experience you develop
+--
+-- Setup:
+-- workspace.Brainrots contains pet Models
+-- Each pet has a ProximityPrompt
+-- Optional attributes: Rarity, DisplayName
+--
+-- Uses normal ProximityPrompt activation.
+-- Server-defined hold durations remain enforced.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ProximityPromptService =
+    game:GetService("ProximityPromptService")
+
+local player = Players.LocalPlayer
+
+local rarityOrder = {
+    Common = 1,
+    Uncommon = 2,
+    Rare = 3,
+    Epic = 4,
+    Legendary = 5,
+    Mythic = 6,
+    ["Brainrot God"] = 7,
+    Secret = 8,
+    OG = 9
+}
+
+local config = {
+    Enabled = false,
+    Mode = "Highest Rarity",
+    Range = 10,
+    SelectedPets = {},
+    ActivePrompt = nil
+}
+
+local folder = workspace:WaitForChild("Brainrots")
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "XenHubV5"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local function make(class, props, parent)
+    local object = Instance.new(class)
+
+    for key, value in pairs(props) do
+        object[key] = value
+    end
+
+    object.Parent = parent
+    return object
+end
+
+local function widget(title, position, size)
+    local frame = make("Frame", {
+        Size = size,
+        Position = position,
+        BackgroundColor3 = Color3.fromRGB(17, 18, 23),
+        BorderSizePixel = 0,
+        Active = true,
+        Draggable = true
+    }, gui)
+
+    make("UICorner", {
+        CornerRadius = UDim.new(0, 9)
+    }, frame)
+
+    make("UIStroke", {
+        Color = Color3.fromRGB(55, 57, 68)
+    }, frame)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 36),
+        BackgroundTransparency = 1,
+        Text = title,
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 15
+    }, frame)
+
+    local content = make("Frame", {
+        Position = UDim2.fromOffset(10, 43),
+        Size = UDim2.new(1, -20, 1, -53),
+        BackgroundTransparency = 1
+    }, frame)
+
+    make("UIListLayout", {
+        Padding = UDim.new(0, 7),
+        SortOrder = Enum.SortOrder.LayoutOrder
+    }, content)
+
+    return content
+end
+
+local function button(parent, title, callback)
+    local b = make("TextButton", {
+        Size = UDim2.new(1, 0, 0, 35),
+        BackgroundColor3 = Color3.fromRGB(37, 39, 48),
+        Text = title,
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12
+    }, parent)
+
+    make("UICorner", {
+        CornerRadius = UDim.new(0, 6)
+    }, b)
+
+    b.MouseButton1Click:Connect(function()
+        callback(b)
+    end)
+
+    return b
+end
+
+local grabWidget = widget(
+    "XENHUB V5 | AUTO GRAB",
+    UDim2.new(0.12, 0, 0.3, 0),
+    UDim2.fromOffset(260, 185)
+)
+
+local petWidget = widget(
+    "PET SELECTOR",
+    UDim2.new(0.58, 0, 0.3, 0),
+    UDim2.fromOffset(260, 310)
+)
+
+button(grabWidget, "AUTO GRAB: OFF", function(b)
+    config.Enabled = not config.Enabled
+
+    b.Text = config.Enabled
+        and "AUTO GRAB: ON"
+        or "AUTO GRAB: OFF"
+
+    b.BackgroundColor3 = config.Enabled
+        and Color3.fromRGB(25, 125, 65)
+        or Color3.fromRGB(37, 39, 48)
+end)
+
+local status = make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 35),
+    BackgroundTransparency = 1,
+    Text = "Waiting for target...",
+    TextColor3 = Color3.fromRGB(180, 180, 190),
+    Font = Enum.Font.Gotham,
+    TextSize = 11,
+    TextTruncate = Enum.TextTruncate.AtEnd
+}, grabWidget)
+
+button(petWidget, "MODE: HIGHEST RARITY", function(b)
+    if config.Mode == "Highest Rarity" then
+        config.Mode = "Selected Pets"
+    else
+        config.Mode = "Highest Rarity"
+    end
+
+    b.Text = "MODE: " .. string.upper(config.Mode)
+end)
+
+local scroll = make("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 0, 190),
+    BackgroundColor3 = Color3.fromRGB(25, 26, 33),
+    BorderSizePixel = 0,
+    ScrollBarThickness = 3,
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    CanvasSize = UDim2.fromOffset(0, 0)
+}, petWidget)
+
+local layout = make("UIListLayout", {
+    Padding = UDim.new(0, 4)
+}, scroll)
+
+local function petName(model)
+    return model:GetAttribute("DisplayName") or model.Name
+end
+
+local function petRarity(model)
+    return model:GetAttribute("Rarity") or "Common"
+end
+
+local function refreshPets()
+    for _, child in ipairs(scroll:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+
+    local names = {}
+
+    for _, model in ipairs(folder:GetChildren()) do
+        if model:IsA("Model") then
+            local name = petName(model)
+
+            if not names[name] then
+                names[name] = petRarity(model)
+            end
+        end
+    end
+
+    local sorted = {}
+
+    for name in pairs(names) do
+        table.insert(sorted, name)
+    end
+
+    table.sort(sorted, function(a, b)
+        return (rarityOrder[names[a]] or 0)
+            > (rarityOrder[names[b]] or 0)
+    end)
+
+    for _, name in ipairs(sorted) do
+        local rarity = names[name]
+
+        button(
+            scroll,
+            name .. " [" .. rarity .. "]",
+            function(b)
+                config.SelectedPets[name] =
+                    not config.SelectedPets[name]
+
+                local selected = config.SelectedPets[name]
+
+                b.BackgroundColor3 = selected
+                    and Color3.fromRGB(25, 125, 65)
+                    or Color3.fromRGB(37, 39, 48)
+            end
+        )
+    end
+end
+
+button(petWidget, "REFRESH PETS", function()
+    refreshPets()
+end)
+
+local function getRoot()
+    local character = player.Character
+    return character
+        and character:FindFirstChild("HumanoidRootPart")
+end
+
+local function findBestPet()
+    local root = getRoot()
+    if not root then return nil end
+
+    local bestPet = nil
+    local bestPrompt = nil
+    local bestRank = -1
+    local bestDistance = math.huge
+
+    for _, model in ipairs(folder:GetChildren()) do
+        if not model:IsA("Model") then
+            continue
+        end
+
+        local prompt = model:FindFirstChildWhichIsA(
+            "ProximityPrompt", true
+        )
+
+        local part = model.PrimaryPart
+            or model:FindFirstChildWhichIsA(
+                "BasePart", true
+            )
+
+        if not prompt or not part or not prompt.Enabled then
+            continue
+        end
+
+        local distance =
+            (root.Position - part.Position).Magnitude
+
+        local allowedRange = math.min(
+            config.Range,
+            prompt.MaxActivationDistance
+        )
+
+        if distance > allowedRange then
+            continue
+        end
+
+        local name = petName(model)
+        local rank = rarityOrder[petRarity(model)] or 0
+
+        if config.Mode == "Selected Pets" then
+            if not config.SelectedPets[name] then
+                continue
+            end
+        end
+
+        if rank > bestRank
+            or (rank == bestRank
+                and distance < bestDistance) then
+
+            bestPet = model
+            bestPrompt = prompt
+            bestRank = rank
+            bestDistance = distance
+        end
+    end
+
+    return bestPet, bestPrompt
+end
+
+local lastRefresh = 0
+
+RunService.Heartbeat:Connect(function()
+    if not config.Enabled then
+        status.Text = "Auto Grab disabled"
+        return
+    end
+
+    local pet, prompt = findBestPet()
+
+    if pet and prompt then
+        status.Text = "Target: " .. petName(pet)
+            .. " | " .. petRarity(pet)
+    else
+        status.Text = "Searching for pets..."
+    end
+end)
+
+-- Pet list updates when the collection changes.
+folder.ChildAdded:Connect(function()
+    task.defer(refreshPets)
+end)
+
+folder.ChildRemoved:Connect(function()
+    task.defer(refreshPets)
+end)
+
+refreshPets()
+
+print("XenHub V5 Pet Selector Ready")
